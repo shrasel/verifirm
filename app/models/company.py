@@ -64,6 +64,14 @@ class CompanyData(BaseModel):
         default=None,
         description="Concise, verified description of the company's business"
     )
+    phone: Optional[str] = Field(
+        default=None,
+        description="Primary verified phone number (e.g., '+1 800-555-0199')"
+    )
+    email: Optional[str] = Field(
+        default=None,
+        description="Primary verified contact or general email address"
+    )
     cik: Optional[str] = Field(
         default=None,
         description="US SEC Central Index Key (if public/reporting company)"
@@ -72,3 +80,4 @@ class CompanyData(BaseModel):
         default=True,
         description="Indicates whether the entity possesses a live, responsive web domain"
     )
+

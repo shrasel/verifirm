@@ -82,3 +82,4 @@ async def get_audit_trail(domain: str) -> EnrichmentResponse:
             detail=f"No cached audit record found for domain '{domain}'."
         )
     return cached
+

@@ -47,3 +47,4 @@ def test_audit_provenance_penalizes_hallucination():
     assert "legal_name" not in failures
     assert provenance["founded_year"].confidence < 0.50
     assert "[UNGROUNDED/AUDIT_FAILED]" in provenance["founded_year"].exact_quote
+

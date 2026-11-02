@@ -181,4 +181,55 @@ class JsonLdExtractor:
                                 )
                             )
 
+                    # 6. Telephone / Phone Number
+                    phone = item.get("telephone") or item.get("phone")
+                    if not phone and "contactPoint" in item:
+                        cp = item["contactPoint"]
+                        if isinstance(cp, list) and cp:
+                            phone = cp[0].get("telephone")
+                        elif isinstance(cp, dict):
+                            phone = cp.get("telephone")
+                    if not phone and isinstance(raw_addr, dict):
+                        phone = raw_addr.get("telephone")
+
+                    if phone and isinstance(phone, str) and len(phone.strip()) >= 7:
+                        clean_phone = phone.strip()
+                        bag.extracted_evidence.append(
+                            ExtractedEvidence(
+                                field="phone",
+                                value=clean_phone,
+                                source_name=source_url,
+                                source_type=SourceType.FIRST_PARTY_JSONLD.value,
+                                confidence=0.98,
+                                verbatim_quote=f'"telephone": "{clean_phone}"',
+                                retrieved_at=now_iso
+                            )
+                        )
+
+                    # 7. Email Address
+                    email = item.get("email")
+                    if not email and "contactPoint" in item:
+                        cp = item["contactPoint"]
+                        if isinstance(cp, list) and cp:
+                            email = cp[0].get("email")
+                        elif isinstance(cp, dict):
+                            email = cp.get("email")
+                    if not email and isinstance(raw_addr, dict):
+                        email = raw_addr.get("email")
+
+                    if email and isinstance(email, str) and "@" in email:
+                        clean_email = email.strip().lower()
+                        bag.extracted_evidence.append(
+                            ExtractedEvidence(
+                                field="email",
+                                value=clean_email,
+                                source_name=source_url,
+                                source_type=SourceType.FIRST_PARTY_JSONLD.value,
+                                confidence=0.98,
+                                verbatim_quote=f'"email": "{clean_email}"',
+                                retrieved_at=now_iso
+                            )
+                        )
+
         return extracted_entities
+

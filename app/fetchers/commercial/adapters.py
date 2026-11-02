@@ -60,3 +60,4 @@ class ApolloFetcher(BaseFetcher):
 
         # Call Apollo company enrichment if key present...
         return evidence_bag
+

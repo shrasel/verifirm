@@ -24,7 +24,9 @@ SAMPLE_HOMEPAGE = """
             "addressRegion": "TX",
             "postalCode": "78701",
             "addressCountry": "USA"
-        }
+        },
+        "telephone": "+1 512-555-0199",
+        "email": "contact@acme.com"
     }
     </script>
 </head>
@@ -83,11 +85,15 @@ async def test_end_to_end_pipeline_mocked():
         assert res.data.headquarters is not None
         assert res.data.headquarters.city == "Austin"
         assert res.data.headquarters.state == "TX"
+        assert res.data.phone == "+1 512-555-0199"
+        assert res.data.email == "contact@acme.com"
 
         # Check provenance audit trail
         assert "legal_name" in res.provenance
         assert res.provenance["legal_name"].confidence >= 0.90
         assert "founded_year" in res.provenance
+        assert "phone" in res.provenance
+        assert "email" in res.provenance
 
         # Check confidence tier
         assert res.confidence_score >= 0.90

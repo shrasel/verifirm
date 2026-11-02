@@ -51,6 +51,14 @@ class ConsensusAndScoringEngine:
             import re
             s = re.sub(r"\b(inc|incorporated|corp|corporation|llc|ltd|limited|company|co)\b[.,]?", "", s)
             s = re.sub(r"[^\w\s]", "", s)
+        elif field == "phone":
+            import re
+            digits = re.sub(r"\D", "", s)
+            if len(digits) == 11 and digits.startswith("1"):
+                digits = digits[1:]
+            return digits
+        elif field == "email":
+            return s.strip().lower()
         return " ".join(s.split())
 
     def reconcile_field(self, field: str, candidates: list[ExtractedEvidence]) -> Optional[ReconciledFieldResult]:
@@ -167,7 +175,7 @@ class ConsensusAndScoringEngine:
         # Target fields to reconcile
         target_fields = [
             "legal_name", "brand_name", "status", "founded_year",
-            "headquarters", "employee_range", "industry", "description"
+            "headquarters", "phone", "email", "employee_range", "industry", "description"
         ]
 
         weighted_score_sum = 0.0
@@ -195,6 +203,10 @@ class ConsensusAndScoringEngine:
                 elif field == "headquarters":
                     if isinstance(res.value, dict):
                         data.headquarters = HeadquartersAddress(**res.value)
+                elif field == "phone":
+                    data.phone = str(res.value)
+                elif field == "email":
+                    data.email = str(res.value)
                 elif field == "employee_range":
                     data.employee_range = str(res.value)
                 elif field == "industry":

@@ -53,3 +53,4 @@ class BaseFetcher(ABC):
         Asynchronously fetches and populates raw evidence for a given domain/brand.
         """
         pass
+

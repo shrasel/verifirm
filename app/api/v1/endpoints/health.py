@@ -27,3 +27,4 @@ async def health_check():
             "redis_cache": "connected" if settings.REDIS_URL else "in-memory TTL fallback",
         }
     }
+

@@ -93,3 +93,4 @@ class OpenCorporatesFetcher(BaseFetcher):
                 await client_to_close.aclose()
 
         return evidence_bag
+

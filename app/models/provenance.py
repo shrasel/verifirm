@@ -30,3 +30,4 @@ class Discrepancy(BaseModel):
         description="List of competing values with their respective source and authority score"
     )
     resolution_rationale: str = Field(..., description="Auditable reasoning for selecting the winning value")
+

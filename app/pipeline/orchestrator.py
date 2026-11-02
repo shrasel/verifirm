@@ -143,3 +143,4 @@ class EnrichmentPipelineOrchestrator:
             f"[Confidence: {score}, Tier: {tier.value}]"
         )
         return response
+

@@ -130,6 +130,38 @@ def test_reconcile_all_ground_truth_cross_match(engine):
             source_type=SourceType.FIRST_PARTY_CONTACT.value,
             confidence=0.95,
             retrieved_at="2026-11-01T23:00:00Z"
+        ),
+        ExtractedEvidence(
+            field="phone",
+            value="+1-888-926-2266",
+            source_name="SEC EDGAR",
+            source_type=SourceType.GOVERNMENT_REGISTRY.value,
+            confidence=0.98,
+            retrieved_at="2026-11-01T23:00:00Z"
+        ),
+        ExtractedEvidence(
+            field="phone",
+            value="+1-888-926-2266",
+            source_name="https://stripe.com/contact",
+            source_type=SourceType.FIRST_PARTY_CONTACT.value,
+            confidence=0.96,
+            retrieved_at="2026-11-01T23:00:00Z"
+        ),
+        ExtractedEvidence(
+            field="email",
+            value="info@stripe.com",
+            source_name="https://stripe.com/contact",
+            source_type=SourceType.FIRST_PARTY_CONTACT.value,
+            confidence=0.96,
+            retrieved_at="2026-11-01T23:00:00Z"
+        ),
+        ExtractedEvidence(
+            field="email",
+            value="info@stripe.com",
+            source_name="https://stripe.com",
+            source_type=SourceType.FIRST_PARTY_JSONLD.value,
+            confidence=0.98,
+            retrieved_at="2026-11-01T23:00:00Z"
         )
     ]
 
@@ -140,6 +172,8 @@ def test_reconcile_all_ground_truth_cross_match(engine):
     assert tier == ConfidenceTier.HIGH_ASSURANCE
     assert data.legal_name == "Stripe, Inc."
     assert data.headquarters.city == "South San Francisco"
+    assert data.phone == "+1-888-926-2266"
+    assert data.email == "info@stripe.com"
 
 
 def test_reconcile_single_credible_source_tier(engine):

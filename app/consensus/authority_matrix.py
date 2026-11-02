@@ -58,22 +58,40 @@ class AuthorityMatrix:
             SourceType.FIRST_PARTY_HOMEPAGE.value: 0.95,
             SourceType.FIRST_PARTY_JSONLD.value: 0.92,
             SourceType.COMMERCIAL_API.value: 0.80,
+        },
+        "phone": {
+            SourceType.FIRST_PARTY_JSONLD.value: 0.98,
+            SourceType.FIRST_PARTY_CONTACT.value: 0.96,
+            SourceType.GOVERNMENT_REGISTRY.value: 0.95,
+            SourceType.FIRST_PARTY_HOMEPAGE.value: 0.92,
+            SourceType.FIRST_PARTY_TERMS.value: 0.90,
+            SourceType.COMMERCIAL_API.value: 0.80,
+        },
+        "email": {
+            SourceType.FIRST_PARTY_JSONLD.value: 0.98,
+            SourceType.FIRST_PARTY_CONTACT.value: 0.96,
+            SourceType.FIRST_PARTY_TERMS.value: 0.93,
+            SourceType.FIRST_PARTY_HOMEPAGE.value: 0.92,
+            SourceType.COMMERCIAL_API.value: 0.80,
         }
     }
 
     # Importance weights for calculating overall record confidence
     FIELD_WEIGHTS: dict[str, float] = {
-        "legal_name": 0.25,
+        "legal_name": 0.20,
         "status": 0.15,
-        "headquarters": 0.20,
+        "headquarters": 0.15,
         "founded_year": 0.15,
-        "industry": 0.10,
-        "employee_range": 0.05,
-        "brand_name": 0.05,
-        "description": 0.05,
+        "phone": 0.08,
+        "email": 0.08,
+        "industry": 0.09,
+        "employee_range": 0.04,
+        "brand_name": 0.03,
+        "description": 0.03,
     }
 
     @classmethod
     def get_source_weight(cls, field: str, source_type: str) -> float:
         field_weights = cls.PRIORITY_WEIGHTS.get(field, {})
         return field_weights.get(source_type, 0.70)
+

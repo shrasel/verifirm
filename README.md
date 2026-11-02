@@ -192,3 +192,4 @@ All 17 automated tests cover:
 - Source Authority Matrix and dispute resolution logic.
 - Character-span verbatim grounding audits.
 - Full mocked and live FastAPI endpoints.
+

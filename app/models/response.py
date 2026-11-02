@@ -44,3 +44,4 @@ class EnrichmentResponse(BaseModel):
         default_factory=dict,
         description="Performance metadata (latency, cache hit, execution timestamp)"
     )
+

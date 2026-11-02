@@ -186,8 +186,25 @@ class SecEdgarFetcher(BaseFetcher):
                     )
                 )
 
+            # 5. SEC Registered Business Phone
+            sec_phone = sec_record.get("phone") or business_addr.get("phone")
+            if sec_phone and len(str(sec_phone).strip()) >= 7:
+                clean_phone = str(sec_phone).strip()
+                evidence_bag.extracted_evidence.append(
+                    ExtractedEvidence(
+                        field="phone",
+                        value=clean_phone,
+                        source_name="US SEC EDGAR",
+                        source_type=SourceType.GOVERNMENT_REGISTRY.value,
+                        confidence=0.98,
+                        filing_id=cik,
+                        retrieved_at=now_iso
+                    )
+                )
+
         finally:
             if client_to_close:
                 await client_to_close.aclose()
 
         return evidence_bag
+

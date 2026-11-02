@@ -258,3 +258,4 @@ class CanonicalIdentityResolver:
             )
 
         raise ValueError("Invalid request: No name or website provided.")
+

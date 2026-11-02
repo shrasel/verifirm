@@ -29,7 +29,9 @@ SAMPLE_HTML = """
       "numberOfEmployees": {
         "@type": "QuantitativeValue",
         "value": "7000+"
-      }
+      },
+      "telephone": "+1-888-926-2266",
+      "email": "info@stripe.com"
     }
     </script>
 </head>
@@ -37,6 +39,7 @@ SAMPLE_HTML = """
     <header><h1>Stripe Infrastructure</h1></header>
     <main>
         <p>Founded in 2010 by Patrick and John Collison.</p>
+        <p>Contact our support team at <a href="mailto:support@stripe.com">support@stripe.com</a> or call <a href="tel:+18889262266">+1 (888) 926-2266</a>.</p>
     </main>
     <footer>
         <p>&copy; 2026 Stripe Payments Company Inc. All rights reserved.</p>
@@ -64,6 +67,12 @@ def test_jsonld_extractor():
     assert evidence_by_field["headquarters"].value["city"] == "South San Francisco"
     assert evidence_by_field["headquarters"].value["state"] == "CA"
 
+    assert "phone" in evidence_by_field
+    assert evidence_by_field["phone"].value == "+1-888-926-2266"
+
+    assert "email" in evidence_by_field
+    assert evidence_by_field["email"].value == "info@stripe.com"
+
 
 def test_web_crawler_extractors():
     crawler = FirstPartyWebCrawler()
@@ -78,3 +87,14 @@ def test_web_crawler_extractors():
     assert founded_res is not None
     year, f_quote = founded_res
     assert year == 2010
+
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(SAMPLE_HTML, "html.parser")
+    emails = crawler.extract_contact_emails(soup, clean_text, "stripe.com")
+    assert len(emails) >= 1
+    assert any("support@stripe.com" in mail for mail, _ in emails)
+
+    phones = crawler.extract_phone_numbers(soup, clean_text)
+    assert len(phones) >= 1
+    assert any("888" in phone for phone, _ in phones)
+

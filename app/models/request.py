@@ -33,3 +33,4 @@ class BatchEnrichmentRequest(BaseModel):
         max_length=50,
         description="List of companies to enrich concurrently (max 50 per batch)"
     )
+

@@ -54,3 +54,4 @@ class Stage2DataFetcher:
             f"{len(bag.extracted_evidence)} raw evidence claims."
         )
         return bag
+

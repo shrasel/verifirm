@@ -40,6 +40,23 @@ class FirstPartyWebCrawler(BaseFetcher):
         re.IGNORECASE
     )
 
+    EMAIL_REGEX = re.compile(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+    )
+
+    PHONE_REGEX = re.compile(
+        r"(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{2,4}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}"
+    )
+
+    IGNORED_EMAIL_DOMAINS = {
+        "example.com", "domain.com", "test.com", "yourcompany.com",
+        "sentry.io", "w3.org", "schema.org", "github.com", "cloudflare.com"
+    }
+
+    IGNORED_EMAIL_EXTENSIONS = (
+        ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js", ".woff"
+    )
+
     def __init__(self, client: Optional[httpx.AsyncClient] = None):
         self.settings = get_settings()
         self.client = client
@@ -88,6 +105,79 @@ class FirstPartyWebCrawler(BaseFetcher):
             except ValueError:
                 pass
         return None
+
+    def extract_contact_emails(self, soup: BeautifulSoup, text: str, canonical_domain: str) -> list[tuple[str, str]]:
+        """
+        Extracts verified contact emails from mailto links and page text.
+        Prioritizes domain-matching emails and contact prefixes.
+        """
+        candidates: dict[str, str] = {}
+
+        # 1. Look for explicit mailto links
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            if href.lower().startswith("mailto:"):
+                raw_mail = href[7:].split("?")[0].strip().lower()
+                if "@" in raw_mail and not any(raw_mail.endswith(ext) for ext in self.IGNORED_EMAIL_EXTENSIONS):
+                    domain_part = raw_mail.split("@")[-1]
+                    if domain_part not in self.IGNORED_EMAIL_DOMAINS:
+                        candidates[raw_mail] = f'href="{href}"'
+
+        # 2. Search clean text with regex
+        for match in self.EMAIL_REGEX.finditer(text):
+            email = match.group(0).lower().strip()
+            if any(email.endswith(ext) for ext in self.IGNORED_EMAIL_EXTENSIONS):
+                continue
+            domain_part = email.split("@")[-1]
+            if domain_part in self.IGNORED_EMAIL_DOMAINS:
+                continue
+            if email not in candidates:
+                candidates[email] = match.group(0)
+
+        # Score and rank candidates
+        ranked = []
+        for mail, quote in candidates.items():
+            score = 1.0
+            domain_part = mail.split("@")[-1]
+            if canonical_domain in domain_part or domain_part in canonical_domain:
+                score += 3.0
+            prefix = mail.split("@")[0]
+            if any(p in prefix for p in ["contact", "info", "support", "hello", "press", "legal", "sales", "help"]):
+                score += 2.0
+            ranked.append((score, mail, quote))
+
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        return [(mail, quote) for _, mail, quote in ranked]
+
+    def extract_phone_numbers(self, soup: BeautifulSoup, text: str) -> list[tuple[str, str]]:
+        """
+        Extracts verified phone numbers from tel: links and text.
+        """
+        candidates: dict[str, str] = {}
+
+        # 1. Look for explicit tel: links
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
+            if href.lower().startswith("tel:"):
+                raw_tel = href[4:].strip()
+                digits = re.sub(r"\D", "", raw_tel)
+                if 7 <= len(digits) <= 15:
+                    candidates[raw_tel] = f'href="{href}"'
+
+        # 2. Search clean text with regex
+        for match in self.PHONE_REGEX.finditer(text):
+            raw_phone = match.group(0).strip()
+            digits = re.sub(r"\D", "", raw_phone)
+            # Filter out dates or invalid lengths
+            if 7 <= len(digits) <= 15:
+                # Avoid common false positives like years "2020-2026"
+                if re.match(r"^[12]\d{3}[-–—][12]\d{3}$", raw_phone):
+                    continue
+                # Avoid repetitive digits like "0000000"
+                if len(set(digits)) > 2 and raw_phone not in candidates:
+                    candidates[raw_phone] = raw_phone
+
+        return list(candidates.items())
 
     async def _fetch_single_page(
         self,
@@ -217,6 +307,42 @@ class FirstPartyWebCrawler(BaseFetcher):
                             source_type=SourceType.FIRST_PARTY_HOMEPAGE.value,
                             confidence=0.90,
                             verbatim_quote=page.meta_description[:200],
+                            retrieved_at=now_iso
+                        )
+                    )
+
+                # 5. Extract contact emails & phone numbers
+                soup = BeautifulSoup(page.raw_html, "html.parser")
+                page_src_type = (
+                    SourceType.FIRST_PARTY_CONTACT.value if "contact" in page.path
+                    else (SourceType.FIRST_PARTY_TERMS.value if any(t in page.path for t in ["terms", "privacy"])
+                    else SourceType.FIRST_PARTY_HOMEPAGE.value)
+                )
+
+                emails = self.extract_contact_emails(soup, page.clean_text, canonical_domain)
+                for mail, quote in emails[:2]:
+                    evidence_bag.extracted_evidence.append(
+                        ExtractedEvidence(
+                            field="email",
+                            value=mail,
+                            source_name=page.url,
+                            source_type=page_src_type,
+                            confidence=0.96 if "contact" in page.path else 0.92,
+                            verbatim_quote=quote,
+                            retrieved_at=now_iso
+                        )
+                    )
+
+                phones = self.extract_phone_numbers(soup, page.clean_text)
+                for phone, quote in phones[:2]:
+                    evidence_bag.extracted_evidence.append(
+                        ExtractedEvidence(
+                            field="phone",
+                            value=phone,
+                            source_name=page.url,
+                            source_type=page_src_type,
+                            confidence=0.96 if "contact" in page.path else 0.92,
+                            verbatim_quote=quote,
                             retrieved_at=now_iso
                         )
                     )

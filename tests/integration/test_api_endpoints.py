@@ -46,3 +46,4 @@ def test_audit_endpoint_retrieval():
     payload = response.json()
     assert payload["canonical_domain"] == "stripe.com"
     assert "provenance" in payload
+
