@@ -88,7 +88,7 @@ class CanonicalIdentityResolver:
                 headers={"User-Agent": self.settings.USER_AGENT},
                 timeout=self.settings.HTTP_TIMEOUT_SECONDS,
                 follow_redirects=True,
-                verify=False
+                verify=True
             )
             client = client_to_close
 

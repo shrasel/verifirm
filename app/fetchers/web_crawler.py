@@ -240,7 +240,7 @@ class FirstPartyWebCrawler(BaseFetcher):
                 },
                 timeout=self.settings.HTTP_TIMEOUT_SECONDS,
                 follow_redirects=True,
-                verify=False
+                verify=True
             )
             client = client_to_close
 

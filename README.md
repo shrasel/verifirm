@@ -165,15 +165,80 @@ Or by company name with optional jurisdiction hint:
 }
 ```
 
-### 2. Batch Enrichment
-`POST /api/v1/enrich/batch`
-Enriches up to 50 companies concurrently with bounded execution deadlines.
+### 2. Autonomous Agent Verification & Trajectory
+`POST /api/v1/agent/enrich`
 
-### 3. Historical Provenance Audit
+Dispatches the **CompanyEnrichmentAgent** executing an auditable ReAct cycle (Reason -> Act -> Observe -> Reflect). Returns both the verified company envelope and the full agent reasoning trajectory.
+
+```json
+{
+  "status": "success",
+  "response": {
+    "status": "success",
+    "canonical_domain": "stripe.com",
+    "confidence_score": 0.985,
+    "confidence_tier": "HIGH_ASSURANCE",
+    "data": { ... }
+  },
+  "trajectory": {
+    "task_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+    "target_company": "stripe.com",
+    "status": "completed",
+    "steps": [
+      {
+        "step_number": 1,
+        "thought": "Investigating canonical identity for input 'stripe.com'. Tracing redirects...",
+        "tool_name": "resolve_identity",
+        "observation_summary": "Resolved canonical domain: 'stripe.com' (Active: True)."
+      },
+      {
+        "step_number": 2,
+        "thought": "Crawling first-party pages (/, /about, /terms, /privacy, /contact)...",
+        "tool_name": "crawl_first_party_web",
+        "observation_summary": "Crawled 5 pages. Discovered 14 raw evidence claims."
+      },
+      {
+        "step_number": 3,
+        "thought": "Parsing embedded Schema.org JSON-LD metadata for structured entity attributes...",
+        "tool_name": "extract_structured_jsonld",
+        "observation_summary": "Extracted structured entity declarations."
+      },
+      {
+        "step_number": 4,
+        "thought": "Querying US SEC EDGAR filings for official corporate records...",
+        "tool_name": "query_government_registry",
+        "observation_summary": "SEC EDGAR search complete."
+      },
+      {
+        "step_number": 5,
+        "thought": "Reconciling all collected evidence using the Authority Matrix...",
+        "tool_name": "reconcile_consensus",
+        "observation_summary": "Initial consensus score: 0.985 (HIGH_ASSURANCE)."
+      },
+      {
+        "step_number": 6,
+        "thought": "Auditing all first-party quotes and assertions against scraped ground truth...",
+        "tool_name": "audit_grounding",
+        "observation_summary": "All citation quotes verified verbatim in scraped text."
+      }
+    ]
+  }
+}
+```
+
+### 3. Agent Trajectory Retrieval
+`GET /api/v1/agent/trajectory/{task_id}`
+Retrieves the step-by-step reasoning and action trajectory for a historical agent run.
+
+### 4. Batch Enrichment
+`POST /api/v1/enrich/batch`
+Enriches up to 50 companies concurrently with bounded execution deadlines and concurrency throttling.
+
+### 5. Historical Provenance Audit
 `GET /api/v1/enrich/{domain}/audit`
 Fetches the cached verification envelope and audit log for a given domain.
 
-### 4. Health Check
+### 6. Health Check
 `GET /health`
 
 ---
@@ -185,11 +250,12 @@ Run unit and integration tests:
 pytest -v
 ```
 
-All 17 automated tests cover:
+All 21 automated tests cover:
+- Autonomous ReAct Agent reasoning cycle and trajectory recording.
 - TLD redirect chasing and subdomain normalization.
 - Schema.org JSON-LD structured data extraction.
-- First-party crawler for `/about`, `/terms`, `/privacy`, `/contact`.
+- First-party crawler for `/about`, `/terms`, `/privacy`, `/contact`, phone numbers, and emails.
 - Source Authority Matrix and dispute resolution logic.
 - Character-span verbatim grounding audits.
-- Full mocked and live FastAPI endpoints.
+- Full mocked and live FastAPI endpoints with correlation IDs and unified error envelopes.
 
