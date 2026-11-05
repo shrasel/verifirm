@@ -55,3 +55,91 @@ async def test_resolve_with_website(resolver):
         assert result.canonical_domain == "stripe.com"
         assert result.active_web_presence is True
         assert result.disambiguation_required is False
+
+
+def test_corporate_name_cleanser():
+    from app.pipeline.stage1_canonical import CorporateNameCleanser
+
+    query, brand = CorporateNameCleanser.clean("Meta Platforms, Inc.")
+    assert query == "Meta Platforms"
+    assert brand == "meta"
+
+    query, brand = CorporateNameCleanser.clean("Square, Inc.")
+    assert query == "Square"
+    assert brand == "square"
+
+    query, brand = CorporateNameCleanser.clean("Google DeepMind")
+    assert query == "Google DeepMind"
+    assert brand == "deepmind"
+
+
+@pytest.mark.asyncio
+async def test_bidirectional_verification_guard():
+    def handler(request: httpx.Request):
+        url = str(request.url)
+        if "meta.com" in url:
+            return httpx.Response(200, text="<html><head><title>Meta: Shop AI Glasses & VR</title></head></html>")
+        elif "metacritic.com" in url:
+            return httpx.Response(200, text="<html><head><title>Movie and Game Reviews</title></head></html>")
+        elif "parked.com" in url:
+            return httpx.Response(200, text="<html><head><title>Domain For Sale</title></head></html>")
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
+        resolver = CanonicalIdentityResolver(client=client)
+
+        # Meta candidate should pass verification
+        is_ver, score, landed, title = await resolver.verify_candidate_domain("meta.com", "Meta Platforms", "meta", client)
+        assert is_ver is True
+        assert score >= 0.70
+        assert landed == "meta.com"
+
+        # Metacritic candidate should fail verification for Meta Platforms
+        is_ver_bad, score_bad, _, _ = await resolver.verify_candidate_domain("metacritic.com", "Meta Platforms", "meta", client)
+        assert is_ver_bad is False
+        assert score_bad < 0.50
+
+        # Parked domain should fail verification
+        is_ver_parked, score_parked, _, _ = await resolver.verify_candidate_domain("parked.com", "Acme", "acme", client)
+        assert is_ver_parked is False
+        assert score_parked == 0.0
+
+
+@pytest.mark.asyncio
+async def test_resolve_with_company_name_wikidata_mocked():
+    def handler(request: httpx.Request):
+        url = str(request.url)
+        if "wbsearchentities" in url:
+            return httpx.Response(200, json={
+                "search": [
+                    {"id": "Q380", "label": "Meta Platforms", "description": "American technology company"}
+                ]
+            })
+        elif "wbgetentities" in url:
+            return httpx.Response(200, json={
+                "entities": {
+                    "Q380": {
+                        "claims": {
+                            "P856": [
+                                {"mainsnak": {"datavalue": {"value": "https://www.meta.com/"}}}
+                            ]
+                        }
+                    }
+                }
+            })
+        elif "meta.com" in url:
+            return httpx.Response(200, text="<html><head><title>Meta | AI & Metaverse</title></head></html>")
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, follow_redirects=True) as client:
+        resolver = CanonicalIdentityResolver(client=client)
+        req = EnrichmentRequest(name="Meta Platforms, Inc.")
+        result = await resolver.resolve(req)
+
+        assert result.canonical_domain == "meta.com"
+        assert result.active_web_presence is True
+        assert len(result.candidates) >= 1
+        assert result.candidates[0].score >= 0.80
+
