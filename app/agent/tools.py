@@ -5,9 +5,13 @@ import httpx
 from app.consensus.confidence_scorer import ConsensusAndScoringEngine
 from app.fetchers.base import RawEvidenceBag
 from app.fetchers.jsonld_extractor import JsonLdExtractor
+from app.fetchers.registries.companies_house import CompaniesHouseFetcher
+from app.fetchers.registries.gleif import GleifFetcher
+from app.fetchers.registries.opencorporates import OpenCorporatesFetcher
 from app.fetchers.registries.sec_edgar import SecEdgarFetcher
 from app.fetchers.web_crawler import FirstPartyWebCrawler
 from app.models.request import EnrichmentRequest
+from app.models.response import CandidateEntity
 from app.pipeline.stage1_canonical import CanonicalIdentityResolver, CanonicalResolutionResult
 from app.pipeline.stage4_grounding import GroundingAuditor
 
@@ -25,6 +29,9 @@ class AgentTools:
         self.canonical_resolver = CanonicalIdentityResolver(client=client)
         self.web_crawler = FirstPartyWebCrawler(client=client)
         self.sec_fetcher = SecEdgarFetcher(client=client)
+        self.gleif_fetcher = GleifFetcher(client=client)
+        self.companies_house_fetcher = CompaniesHouseFetcher(client=client)
+        self.opencorporates_fetcher = OpenCorporatesFetcher(client=client)
         self.consensus_engine = ConsensusAndScoringEngine()
         self.grounding_auditor = GroundingAuditor()
 
@@ -32,21 +39,31 @@ class AgentTools:
         self,
         name: Optional[str] = None,
         website: Optional[str] = None,
-        jurisdiction_hint: Optional[str] = None
+        jurisdiction_hint: Optional[str] = None,
+        registration_number: Optional[str] = None,
+        lei: Optional[str] = None,
+        cik: Optional[str] = None,
+        ticker: Optional[str] = None,
+        exchange: Optional[str] = None,
     ) -> CanonicalResolutionResult:
         """
-        Resolves domain redirects, cleans subdomains, or triggers search fallback.
+        Resolves domain redirects, cleans subdomains, or executes cautious candidate discovery.
         """
         req = EnrichmentRequest(
             name=name,
             website=website,
-            jurisdiction_hint=jurisdiction_hint
+            jurisdiction_hint=jurisdiction_hint,
+            registration_number=registration_number,
+            lei=lei,
+            cik=cik,
+            ticker=ticker,
+            exchange=exchange,
         )
         return await self.canonical_resolver.resolve(req)
 
     async def crawl_first_party_web(
         self,
-        canonical_domain: str,
+        canonical_domain: Optional[str],
         brand_name: Optional[str] = None,
         evidence_bag: Optional[RawEvidenceBag] = None
     ) -> RawEvidenceBag:
@@ -68,14 +85,22 @@ class AgentTools:
 
     async def query_government_registry(
         self,
-        canonical_domain: str,
+        canonical_domain: Optional[str],
         brand_name: Optional[str] = None,
         evidence_bag: Optional[RawEvidenceBag] = None
     ) -> RawEvidenceBag:
         """
-        Queries official US SEC EDGAR filings for CIK, legal registered name, and SIC code.
+        Queries official statutory registries (US SEC EDGAR, GLEIF Global LEI Index,
+        UK Companies House, and OpenCorporates aggregator) for legal entity records.
         """
-        return await self.sec_fetcher.fetch(canonical_domain, brand_name, evidence_bag)
+        if evidence_bag is None:
+            evidence_bag = RawEvidenceBag(canonical_domain=canonical_domain, brand_name=brand_name)
+
+        await self.sec_fetcher.fetch(canonical_domain, brand_name, evidence_bag)
+        await self.gleif_fetcher.fetch(canonical_domain, brand_name, evidence_bag)
+        await self.companies_house_fetcher.fetch(canonical_domain, brand_name, evidence_bag)
+        await self.opencorporates_fetcher.fetch(canonical_domain, brand_name, evidence_bag)
+        return evidence_bag
 
     def audit_grounding(
         self,
@@ -97,13 +122,15 @@ class AgentTools:
     def reconcile_consensus(
         self,
         evidence_bag: RawEvidenceBag,
-        active_web_presence: bool = True
+        active_web_presence: bool = True,
+        candidates: Optional[list[CandidateEntity]] = None
     ) -> tuple:
         """
-        Applies Authority Matrix weighting, resolves conflicting claims,
-        and computes field-level and composite confidence scores.
+        Applies Authority Matrix weighting, checks SourceFamily independence,
+        and computes calibrated field-level and composite confidence scores.
         """
         return self.consensus_engine.reconcile_all(
             evidence_bag=evidence_bag,
-            active_web_presence=active_web_presence
+            active_web_presence=active_web_presence,
+            candidates=candidates
         )

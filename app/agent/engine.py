@@ -10,7 +10,7 @@ from app.agent.tools import AgentTools
 from app.fetchers.base import RawEvidenceBag
 from app.models.company import CompanyData, OperatingStatus
 from app.models.request import EnrichmentRequest
-from app.models.response import ConfidenceTier, EnrichmentResponse
+from app.models.response import ConfidenceTier, EnrichmentResponse, MatchDecision
 from app.storage.cache import CacheManager
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,6 @@ class AgentTrajectoryStore:
     @classmethod
     def save(cls, trajectory: AgentTrajectory):
         if len(cls._trajectories) >= 1000:
-            # Drop oldest entry
             oldest_key = next(iter(cls._trajectories))
             cls._trajectories.pop(oldest_key, None)
         cls._trajectories[trajectory.task_id] = trajectory
@@ -37,12 +36,12 @@ class CompanyEnrichmentAgent:
     """
     Autonomous Company Verification & Enrichment Agent.
     Operates via an auditable ReAct cycle (Reason -> Act -> Observe -> Reflect):
-    1. Identity Canonicalization & TLD Resolution
-    2. First-Party Ground-Truth Crawling
+    1. Identity Canonicalization & 3-Way Match Evaluation (AUTO_MATCH, NEEDS_REVIEW, UNRESOLVED)
+    2. First-Party Ground-Truth Crawling (when verified domain exists)
     3. Schema.org JSON-LD Structured Parsing
-    4. Government Registry (SEC EDGAR) Cross-Verification
-    5. Authority Matrix Consensus & Discrepancy Resolution
-    6. Grounding Audit & Hallucination Elimination
+    4. Multi-Registry Cross-Verification (SEC EDGAR, GLEIF LEI, UK Companies House, OpenCorporates)
+    5. Source-Independent Authority Matrix Consensus & Discrepancy Resolution
+    6. Grounding Audit & Post-Audit Score Recalculation
     7. Self-Reflection & Final Audit Envelope Packaging
     """
 
@@ -60,11 +59,14 @@ class CompanyEnrichmentAgent:
         task_id = str(uuid.uuid4())
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        target_label = request.website or request.name or "unknown"
+        target_label = (
+            request.website or request.name or request.cik or request.lei
+            or request.registration_number or request.ticker or "unknown"
+        )
         trajectory = AgentTrajectory(
             task_id=task_id,
             target_company=target_label,
-            goal="Verify and enrich company firmographics targeting >= 0.95 confidence with auditable consensus."
+            goal="Verify corporate identity and enrich firmographics with calibrated confidence and explicit abstention."
         )
 
         logger.info(f"Agent [{task_id}] dispatched for target: {target_label}")
@@ -94,12 +96,17 @@ class CompanyEnrichmentAgent:
         t_step = time.time()
         thought_1 = (
             f"Investigating canonical identity for input '{target_label}'. "
-            "Tracing HTTP redirects, stripping subdomains, and verifying active domain status."
+            "Evaluating candidate sources, verifying landing pages, and applying 3-way linkage decision."
         )
         stage1_res = await self.tools.resolve_identity(
             name=request.name,
             website=request.website,
-            jurisdiction_hint=request.jurisdiction_hint
+            jurisdiction_hint=request.jurisdiction_hint,
+            registration_number=request.registration_number,
+            lei=request.lei,
+            cik=request.cik,
+            ticker=request.ticker,
+            exchange=request.exchange,
         )
         canonical_domain = stage1_res.canonical_domain
 
@@ -108,35 +115,37 @@ class CompanyEnrichmentAgent:
             tool_name="resolve_identity",
             tool_input={"name": request.name, "website": request.website},
             observation_summary=(
-                f"Resolved canonical domain: '{canonical_domain}' "
+                f"Match decision: {stage1_res.match_decision.value}. "
+                f"Canonical domain: '{canonical_domain}' "
                 f"(Active web presence: {stage1_res.active_web_presence}, "
                 f"Candidates: {len(stage1_res.candidates)})."
             ),
             duration_ms=(time.time() - t_step) * 1000
         )
 
-        # Handle homonyms / ambiguity
+        # Handle homonyms / ambiguity (NEEDS_REVIEW)
         if stage1_res.disambiguation_required and stage1_res.candidates:
             trajectory.add_step(
                 thought=(
-                    f"Target name '{request.name}' matched multiple distinct business entities. "
-                    "Halting execution to request user disambiguation rather than guessing."
+                    f"Target name '{request.name}' produced competing or moderate-confidence candidates. "
+                    "Routing to NEEDS_REVIEW rather than silently guessing."
                 ),
                 tool_name="flag_disambiguation",
                 tool_input={"candidates_count": len(stage1_res.candidates)},
-                observation_summary=f"Flagged {len(stage1_res.candidates)} candidates for human review."
+                observation_summary=f"Flagged {len(stage1_res.candidates)} candidates for review."
             )
             trajectory.status = "needs_disambiguation"
-            trajectory.final_confidence_score = 0.50
+            trajectory.final_confidence_score = round(stage1_res.candidates[0].score, 3)
             trajectory.total_duration_ms = round((time.time() - start_time) * 1000, 2)
             trajectory.completed_at = datetime.now(timezone.utc).isoformat()
             AgentTrajectoryStore.save(trajectory)
 
             response = EnrichmentResponse(
                 status="needs_disambiguation",
+                match_decision=MatchDecision.NEEDS_REVIEW,
                 request_id=task_id,
-                canonical_domain=canonical_domain,
-                confidence_score=0.50,
+                canonical_domain=None,
+                confidence_score=trajectory.final_confidence_score,
                 confidence_tier=ConfidenceTier.DISAMBIGUATION_REQUIRED,
                 data=CompanyData(
                     brand_name=request.name,
@@ -155,55 +164,60 @@ class CompanyEnrichmentAgent:
             )
             return response, trajectory
 
-        if not canonical_domain:
-            raise ValueError(f"Could not resolve canonical domain for request: {request}")
-
-        # --- STEP 2: FIRST-PARTY GROUND-TRUTH CRAWL ---
-        t_step = time.time()
-        thought_2 = (
-            f"Dispatching crawler to harvest first-party ground-truth evidence directly from {canonical_domain} "
-            "across /, /about, /terms, /privacy, and /contact."
-        )
         evidence_bag = RawEvidenceBag(
             canonical_domain=canonical_domain,
-            brand_name=stage1_res.resolved_brand_name or request.name
-        )
-        evidence_bag = await self.tools.crawl_first_party_web(
-            canonical_domain=canonical_domain,
-            brand_name=evidence_bag.brand_name,
-            evidence_bag=evidence_bag
-        )
-        trajectory.add_step(
-            thought=thought_2,
-            tool_name="crawl_first_party_web",
-            tool_input={"canonical_domain": canonical_domain},
-            observation_summary=(
-                f"Crawled {len(evidence_bag.pages)} pages. "
-                f"Discovered {len(evidence_bag.extracted_evidence)} raw evidence claims."
-            ),
-            duration_ms=(time.time() - t_step) * 1000
+            brand_name=stage1_res.resolved_brand_name or request.name,
+            jurisdiction_hint=request.jurisdiction_hint,
+            cik=request.cik,
+            lei=request.lei,
+            registration_number=request.registration_number,
+            ticker=request.ticker,
+            exchange=request.exchange,
+            http_status=stage1_res.http_status,
         )
 
-        # --- STEP 3: SCHEMA.ORG JSON-LD PARSING ---
-        t_step = time.time()
-        thought_3 = (
-            "Parsing embedded Schema.org JSON-LD metadata for structured Corporation / Organization "
-            "attributes including registered legal name, headquarters, telephone, and email."
-        )
-        jsonld_claims_count = self.tools.extract_structured_jsonld(evidence_bag)
-        trajectory.add_step(
-            thought=thought_3,
-            tool_name="extract_structured_jsonld",
-            tool_input={"pages_evaluated": len(evidence_bag.pages)},
-            observation_summary=f"Parsed JSON-LD graphs. Total extracted claims now {len(evidence_bag.extracted_evidence)}.",
-            duration_ms=(time.time() - t_step) * 1000
-        )
+        # --- STEP 2 & 3: FIRST-PARTY GROUND-TRUTH CRAWL & JSON-LD (IF DOMAIN VERIFIED) ---
+        if canonical_domain:
+            t_step = time.time()
+            thought_2 = (
+                f"Dispatching crawler to harvest first-party ground-truth evidence directly from {canonical_domain} "
+                "across /, /about, /terms, /privacy, and /contact."
+            )
+            evidence_bag = await self.tools.crawl_first_party_web(
+                canonical_domain=canonical_domain,
+                brand_name=evidence_bag.brand_name,
+                evidence_bag=evidence_bag
+            )
+            trajectory.add_step(
+                thought=thought_2,
+                tool_name="crawl_first_party_web",
+                tool_input={"canonical_domain": canonical_domain},
+                observation_summary=(
+                    f"Crawled {len(evidence_bag.pages)} pages. "
+                    f"Discovered {len(evidence_bag.extracted_evidence)} raw evidence claims."
+                ),
+                duration_ms=(time.time() - t_step) * 1000
+            )
+
+            t_step = time.time()
+            thought_3 = (
+                "Parsing embedded Schema.org JSON-LD metadata for structured Corporation / Organization "
+                "attributes including registered legal name, headquarters, telephone, and email."
+            )
+            self.tools.extract_structured_jsonld(evidence_bag)
+            trajectory.add_step(
+                thought=thought_3,
+                tool_name="extract_structured_jsonld",
+                tool_input={"pages_evaluated": len(evidence_bag.pages)},
+                observation_summary=f"Parsed JSON-LD graphs. Total extracted claims now {len(evidence_bag.extracted_evidence)}.",
+                duration_ms=(time.time() - t_step) * 1000
+            )
 
         # --- STEP 4: GOVERNMENT REGISTRY CROSS-VERIFICATION ---
         t_step = time.time()
         thought_4 = (
-            f"Querying US SEC EDGAR filings for official corporate records matching '{canonical_domain}' "
-            "to establish certified legal ground truth."
+            f"Querying official statutory registries (SEC EDGAR, GLEIF LEI, UK Companies House) "
+            f"for '{evidence_bag.brand_name or canonical_domain}' to establish legal ground truth."
         )
         evidence_bag = await self.tools.query_government_registry(
             canonical_domain=canonical_domain,
@@ -215,27 +229,61 @@ class CompanyEnrichmentAgent:
             tool_name="query_government_registry",
             tool_input={"query": evidence_bag.brand_name or canonical_domain},
             observation_summary=(
-                f"SEC EDGAR search complete. Discovered {len(evidence_bag.registry_filings)} official filings."
+                f"Registry search complete. Discovered {len(evidence_bag.registry_filings)} official filings."
             ),
             duration_ms=(time.time() - t_step) * 1000
         )
 
+        # If neither domain nor registry yielded evidence, abstain cleanly as UNRESOLVED
+        if not canonical_domain and not evidence_bag.extracted_evidence:
+            total_duration = round((time.time() - start_time) * 1000, 2)
+            trajectory.status = "unresolved"
+            trajectory.final_confidence_score = 0.0
+            trajectory.total_duration_ms = total_duration
+            trajectory.completed_at = datetime.now(timezone.utc).isoformat()
+            AgentTrajectoryStore.save(trajectory)
+
+            response = EnrichmentResponse(
+                status="unresolved",
+                match_decision=MatchDecision.UNRESOLVED,
+                request_id=task_id,
+                canonical_domain=None,
+                confidence_score=0.0,
+                confidence_tier=ConfidenceTier.UNRESOLVED,
+                data=CompanyData(
+                    brand_name=request.name,
+                    status=OperatingStatus.UNKNOWN,
+                    active_web_presence=False
+                ),
+                provenance={},
+                discrepancies=[],
+                candidates=stage1_res.candidates,
+                metadata={
+                    "task_id": task_id,
+                    "latency_ms": total_duration,
+                    "cache_hit": False,
+                    "freshness_timestamp": now_iso,
+                    "agent_steps": len(trajectory.steps)
+                }
+            )
+            return response, trajectory
+
         # --- STEP 5: CONSENSUS & AUTHORITY MATRIX RESOLUTION ---
         t_step = time.time()
         thought_5 = (
-            "Reconciling all collected evidence using the Authority Matrix. "
-            "Resolving discrepancies with priority: Government Registry > Terms of Service > Commercial."
+            "Reconciling all collected evidence using the Authority Matrix and SourceFamily independence rules."
         )
         data, provenance, discrepancies, score, tier = self.tools.reconcile_consensus(
             evidence_bag=evidence_bag,
-            active_web_presence=stage1_res.active_web_presence
+            active_web_presence=stage1_res.active_web_presence,
+            candidates=stage1_res.candidates
         )
         trajectory.add_step(
             thought=thought_5,
             tool_name="reconcile_consensus",
             tool_input={"total_claims": len(evidence_bag.extracted_evidence)},
             observation_summary=(
-                f"Initial consensus score: {score} ({tier.value}). "
+                f"Consensus score: {score} ({tier.value}). "
                 f"Resolved {len(discrepancies)} conflicting field discrepancies."
             ),
             duration_ms=(time.time() - t_step) * 1000
@@ -248,23 +296,19 @@ class CompanyEnrichmentAgent:
             "to guarantee zero hallucination."
         )
         grounding_failures = self.tools.audit_grounding(evidence_bag, provenance)
+        if grounding_failures:
+            score, tier = self.tools.consensus_engine.compute_composite_score_and_tier(provenance)
+
         trajectory.add_step(
             thought=thought_6,
             tool_name="audit_grounding",
             tool_input={"fields_audited": len(provenance)},
             observation_summary=(
-                f"Grounding audit finished. {len(grounding_failures)} ungrounded fields penalized."
+                f"Grounding audit finished. {len(grounding_failures)} ungrounded fields penalized; recalculated score={score}."
                 if grounding_failures else "All citation quotes verified verbatim in scraped text."
             ),
             duration_ms=(time.time() - t_step) * 1000
         )
-
-        # Recalculate composite score if grounding audit penalized any fields
-        if grounding_failures:
-            _, _, _, score, tier = self.tools.reconcile_consensus(
-                evidence_bag=evidence_bag,
-                active_web_presence=stage1_res.active_web_presence
-            )
 
         # --- STEP 7: SYNTHESIS & AUDIT ENVELOPE PACKAGING ---
         total_duration = round((time.time() - start_time) * 1000, 2)
@@ -287,6 +331,7 @@ class CompanyEnrichmentAgent:
 
         response = EnrichmentResponse(
             status="success",
+            match_decision=MatchDecision.AUTO_MATCH,
             request_id=task_id,
             canonical_domain=canonical_domain,
             confidence_score=score,
@@ -306,11 +351,11 @@ class CompanyEnrichmentAgent:
             }
         )
 
-        # Persist to cache
-        self.cache.set(canonical_domain, response)
+        if canonical_domain:
+            self.cache.set(canonical_domain, response)
 
         logger.info(
-            f"Agent [{task_id}] completed enrichment for '{canonical_domain}' in {total_duration}ms "
+            f"Agent [{task_id}] completed enrichment for '{canonical_domain or target_label}' in {total_duration}ms "
             f"[Confidence: {score}, Tier: {tier.value}, Steps: {len(trajectory.steps)}]"
         )
         return response, trajectory

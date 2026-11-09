@@ -37,8 +37,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Auditable, near-100% accurate company verification & autonomous enrichment agent.",
-    version="1.0.0",
+    description="Auditable, evidence-backed corporate identity resolution & firmographics verification engine.",
+    version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"

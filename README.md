@@ -1,71 +1,80 @@
-# Company Verification & Enrichment Service
+# Verifirm — Auditable Corporate Identity Resolution & Enrichment Engine
 
-An auditable, multi-stage verification pipeline engineered to achieve **near-100% accuracy** for company firmographics and legal identity resolution.
+An open-source, evidence-backed corporate identity resolution and firmographics verification service.
 
-Unlike conventional commercial enrichment APIs that rely on stale aggregations and probabilistic fuzzy joins, this service treats enrichment as an **auditable consensus pipeline**:
-1. **Resolves canonical identity** across TLD migrations, subdomains, and 301/302 redirects.
-2. **Harvests multi-tier evidence in parallel** from first-party company websites, schema.org JSON-LD, and official government registries (US SEC EDGAR, UK Companies House).
-3. **Reconciles competing claims** using a deterministic Source Authority Matrix (`Government Registry > First-Party Terms > Commercial`).
-4. **Enforces character-span grounding audits** against raw scraped text to strictly reject LLM hallucinations.
-5. **Returns a cryptographic audit trail and provenance envelope** recording every source, timestamp, and citation quote.
+Rather than promising universal 100% matching across every jurisdiction or silently guessing `{brand}.com` domains, **Verifirm** treats company verification as a cautious, probabilistic linkage and consensus problem with an explicit **three-way decision (`AUTO_MATCH`, `NEEDS_REVIEW`, `UNRESOLVED`)** and field-level provenance.
+
+---
+
+## Core Architectural Principles
+
+1. **Three-Way Probabilistic Entity Resolution (Fellegi–Sunter Model)**:
+   - **`AUTO_MATCH`**: Evidence crosses a calibrated confidence threshold ($\ge 0.75$) with a clear separation margin ($\ge 0.12$) over competing candidates.
+   - **`NEEDS_REVIEW`**: Plausible competing candidates (e.g., homonyms like *"Delta Air Lines"* vs. *"Delta Faucet"*) or moderate evidence ($0.45 \le \text{score} < 0.75$). Returns all ranked candidates with supporting and contradicting signals.
+   - **`UNRESOLVED`**: Insufficient or unverified evidence ($< 0.45$). **Never fabricates `{brand}.com` fallback domains.**
+2. **Separation of Legal Entity, Brand, Website Assertion, and Listed Security**:
+   - **`LegalEntityRecord`**: Official registered name (exact spelling & casing preserved without `.title()` mutation), jurisdiction, registration number, LEI, CIK, statutory status (`Active`, `Inactive`, `Dissolved`, `Unknown`), registered office address, and former names.
+   - **`BrandProfile`**: Commercial brand name, operating headquarters address, verified telephone, contact email, headcount range, and description.
+   - **`WebsiteAssertion`**: Treats a web domain as a separate assertion linked to the legal entity by explicit evidence (`linkage_signals`, `verification_score`, `is_independently_verified`). Website liveness (HTTP 200) is never conflated with statutory `OperatingStatus.ACTIVE`.
+   - **`SecurityListing`**: Ticker symbol, exchange, and CIK/FIGI.
+3. **True Source-Family Independence**:
+   - Distinguishes between **primary statutory registries** (`GOVERNMENT_REGISTRY`: US SEC EDGAR, GLEIF Global LEI Index, UK Companies House), **registry aggregators** (`REGISTRY_AGGREGATOR`: OpenCorporates), **first-party web declarations** (`FIRST_PARTY_WEB`: `/terms`, Schema.org JSON-LD, `/about`, `/contact`), and **commercial vendor estimates** (`COMMERCIAL_API`: People Data Labs, Apollo).
+   - Multiple extractions from the same website (`/` JSON-LD and `/terms` text) belong to a single `FIRST_PARTY_WEB` source family (`independent_sources_count = 1`) and cannot trigger a cross-source consensus boost without an independent registry or external source.
+4. **Pre-Score Character-Span Grounding Audit**:
+   - Every first-party textual assertion must cite a verbatim substring from the scraped corpus. Ungrounded claims are penalized *before* the composite confidence score and assurance tier are calculated.
+5. **Empirical Evaluation & Calibration Benchmark**:
+   - Includes a reproducible benchmark suite (`python -m benchmarks.evaluate`) measuring `AUTO_MATCH` precision, recall, abstention accuracy, per-field accuracy, and **Brier calibration score**.
 
 ---
 
 ## Architecture Overview
 
 ```
-                 [User Input: Name, Website, or Both]
-                                   │
-                                   ▼
-          ┌──────────────────────────────────────────────────┐
-          │  Stage 1: Identity Resolution & Canonicalization │
-          │  • Domain de-duplication & redirect tracing      │
-          │  • Search API fallback (Name -> Domain)          │
-          │  • Entity disambiguation & CAGE/SEC mapping      │
-          └────────────────────────┬─────────────────────────┘
-                                   │ Canonical Root Domain
-                                   ▼
-          ┌──────────────────────────────────────────────────┐
-          │     Stage 2: Parallel Multi-Tier Data Fetching   │
-          ├────────────────┬─────────────────┬───────────────┤
-          │ Tier A: Primary│ Tier B: Official│ Tier C: B2B   │
-          │ Scraping Engine│ Registries      │ API Waterfall │
-          │ (Site/About/TOS│ (SEC EDGAR,     │ (PDL, Apollo, │
-          │ & JSON-LD)     │ Companies House)│ Crunchbase)   │
-          └────────┬───────┴────────┬────────┴───────┬───────┘
-                   │                │                │
-                   └────────────────┼────────────────┘
-                                    │ Raw Data Streams
-                                    ▼
-          ┌──────────────────────────────────────────────────┐
-          │   Stage 3: Reconciliation & Consensus Engine     │
-          │  • Multi-source cross-verification               │
-          │  • Deterministic Authority Matrix weighting      │
-          │  • Discrepancy detection & tie-breaker logic     │
-          │  • Field-level & composite confidence scoring    │
-          └────────────────────────┬─────────────────────────┘
-                                    │ Reconciled Fields + Score
-                                    ▼
-          ┌──────────────────────────────────────────────────┐
-          │   Stage 4: Structured LLM Normalization & QA     │
-          │  • Strict Pydantic schema validation             │
-          │  • Verbatim character-span grounding audit       │
-          │  • Hallucination detection & confidence penalty  │
-          └────────────────────────┬─────────────────────────┘
-                                   │
-                                   ▼
-                 [Validated JSON + Confidence Metadata]
+      [User Input: Name, Website, Jurisdiction, CIK, LEI, Reg#, or Ticker]
+                                       │
+                                       ▼
+          ┌────────────────────────────────────────────────────────┐
+          │  Stage 1: Cautious Identity & Candidate Resolution     │
+          │  • Redirect tracing & root domain canonicalization     │
+          │  • Candidate generation (Wikidata P856, Brave/DDG)     │
+          │  • Landing-page verification guard                     │
+          │  • Fellegi-Sunter 3-Way Decision:                      │
+          │    AUTO_MATCH | NEEDS_REVIEW | UNRESOLVED              │
+          └────────────────────────────┬───────────────────────────┘
+                                       │
+                                       ▼
+          ┌────────────────────────────────────────────────────────┐
+          │  Stage 2: Parallel Multi-Tier Evidence Harvesting      │
+          ├──────────────────┬───────────────────┬─────────────────┤
+          │ Tier A: 1st-Party│ Tier B: Official  │ Tier C: Optional│
+          │ Web & JSON-LD    │ Registries        │ Aggregators &   │
+          │ (/, /terms,      │ (SEC EDGAR,       │ Vendors (Open-  │
+          │ /about, /contact)│ GLEIF LEI, UK CH) │ Corporates, PDL)│
+          └────────┬─────────┴─────────┬─────────┴────────┬────────┘
+                   └───────────────────┼──────────────────┘
+                                       │ RawEvidenceBag
+                                       ▼
+          ┌────────────────────────────────────────────────────────┐
+          │  Stage 3 & 4: Grounding Audit & Calibrated Consensus   │
+          │  • Verbatim character-span grounding check (pre-score) │
+          │  • Authority Matrix + extractor confidence weighting   │
+          │  • SourceFamily independence verification              │
+          │  • Completeness-adjusted composite confidence score    │
+          └────────────────────────────┬───────────────────────────┘
+                                       │
+                                       ▼
+             [EnrichmentResponse: LegalEntity + Brand + Provenance]
 ```
 
 ---
 
-## Zero-Credential Quickstart
+## Zero-Key Quickstart
 
-The service is designed to run **out-of-the-box with zero paid API keys**:
-- Uses **SEC EDGAR's public API** for US corporate filings (zero keys).
-- Uses **DuckDuckGo search fallback** for Name $\rightarrow$ Domain discovery (zero keys).
-- Uses **Direct First-Party Web Crawling & Schema.org JSON-LD parsing** (zero keys).
-- Provides **pluggable adapters** for commercial providers (OpenCorporates, Apollo, PDL) if you choose to add keys later in `.env`.
+The core verification pipeline runs out-of-the-box with **zero paid API keys**:
+- **US SEC EDGAR API** (zero-key; rate-limited to $\le 10$ req/s per SEC fair-access policy) for US reporting issuers.
+- **GLEIF Global LEI API** (zero-key) for global legal entities, statutory addresses, and registration numbers.
+- **Wikidata Knowledge Graph (`P856`) + DuckDuckGo** (zero-key) as candidate generators verified by live landing-page inspection.
+- **Optional Pluggable Adapters**: Configure `BRAVE_SEARCH_API_KEY`, `COMPANIES_HOUSE_API_KEY`, `OPENCORPORATES_API_KEY`, `PDL_API_KEY`, or `APOLLO_API_KEY` in `.env` when needed.
 
 ### 1. Setup Virtual Environment
 ```bash
@@ -74,11 +83,11 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### 2. Run the Development Server
+### 2. Start the FastAPI Server
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
-API Documentation is available at `http://localhost:8000/docs`.
+Interactive OpenAPI documentation is available at `http://localhost:8000/docs`.
 
 ### 3. Run with Docker Compose (with Redis)
 ```bash
@@ -87,23 +96,24 @@ docker compose up --build
 
 ---
 
-## API Endpoints
+## API Usage Examples
 
-### 1. Single Company Enrichment
-`POST /api/v1/enrich`
+### 1. Enrich by Website, Name, or Exact Registry Identifier (`POST /api/v1/enrich`)
 
-#### Request Body
+#### By Exact Identifier (LEI, CIK, or Ticker)
+```json
+{
+  "name": "NVIDIA",
+  "ticker": "NVDA",
+  "jurisdiction_hint": "US"
+}
+```
+
+#### By Company Name or Website
 ```json
 {
   "website": "https://stripe.com",
   "force_refresh": false
-}
-```
-Or by company name with optional jurisdiction hint:
-```json
-{
-  "name": "Stripe",
-  "jurisdiction_hint": "US"
 }
 ```
 
@@ -111,151 +121,90 @@ Or by company name with optional jurisdiction hint:
 ```json
 {
   "status": "success",
+  "match_decision": "AUTO_MATCH",
   "request_id": "94cdb43e-a63d-46b3-ba0f-20f958ce9f4d",
-  "canonical_domain": "stripe.com",
-  "confidence_score": 0.985,
+  "canonical_domain": "nvidia.com",
+  "confidence_score": 0.902,
   "confidence_tier": "HIGH_ASSURANCE",
   "data": {
-    "legal_name": "Stripe, Inc.",
-    "brand_name": "Stripe",
+    "legal_name": "NVIDIA CORP",
+    "brand_name": "NVIDIA",
     "status": "Active",
-    "founded_year": 2010,
     "headquarters": {
-      "street": "354 Oyster Point Blvd",
-      "city": "South San Francisco",
+      "street": "2788 SAN TOMAS EXPRESSWAY",
+      "city": "SANTA CLARA",
       "state": "CA",
-      "postal_code": "94080",
+      "postal_code": "95051",
       "country": "USA",
-      "formatted_address": "354 Oyster Point Blvd, South San Francisco, CA 94080"
+      "formatted_address": "2788 SAN TOMAS EXPRESSWAY, SANTA CLARA, CA, 95051"
     },
-    "employee_range": "5001-10000",
-    "industry": {
-      "sector": "Financial Services",
-      "sic_code": "7372",
-      "label": "Financial Transactions Processing"
+    "registered_office": {
+      "street": "251 LITTLE FALLS DRIVE",
+      "city": "WILMINGTON",
+      "state": "DE",
+      "postal_code": "19808",
+      "country": "USA",
+      "formatted_address": "251 LITTLE FALLS DRIVE, WILMINGTON, DE, 19808"
     },
-    "website": "https://stripe.com",
-    "active_web_presence": true
+    "cik": "0001045810",
+    "jurisdiction": "US-DE",
+    "active_web_presence": true,
+    "legal_entity": {
+      "registered_name": "NVIDIA CORP",
+      "jurisdiction": "US-DE",
+      "cik": "0001045810",
+      "legal_status": "Active"
+    },
+    "website_assertion": {
+      "canonical_domain": "nvidia.com",
+      "website_url": "https://nvidia.com",
+      "is_online": true,
+      "linkage_signals": [
+        "official_registry_legal_entity_verified",
+        "wikidata_p856_candidate",
+        "landing_page_title_match",
+        "http_live_response"
+      ],
+      "verification_score": 0.8,
+      "is_independently_verified": true
+    },
+    "securities": [
+      {
+        "ticker": "NVDA",
+        "exchange": "Nasdaq",
+        "cik": "0001045810"
+      }
+    ]
   },
   "provenance": {
     "legal_name": {
       "source": "US Securities and Exchange Commission (SEC EDGAR)",
       "source_type": "GOVERNMENT_REGISTRY",
-      "confidence": 1.0,
-      "filing_id": "0001628280",
-      "verified_at": "2026-11-01T23:50:00Z"
-    },
-    "headquarters": {
-      "source": "https://stripe.com/privacy",
-      "source_type": "FIRST_PARTY_TERMS",
       "confidence": 0.96,
-      "exact_quote": "354 Oyster Point Blvd, South San Francisco, CA 94080",
-      "verified_at": "2026-11-01T23:50:00Z"
+      "exact_quote": "SEC CIK 0001045810: NVIDIA CORP",
+      "filing_id": "0001045810",
+      "independent_sources_count": 2
     }
   },
   "discrepancies": [],
-  "candidates": [],
-  "metadata": {
-    "latency_ms": 1150.4,
-    "cache_hit": false,
-    "freshness_timestamp": "2026-11-01T23:50:00Z",
-    "pages_crawled": 5,
-    "evidence_count": 14
-  }
+  "candidates": []
 }
 ```
 
-### 2. Autonomous Agent Verification & Trajectory
-`POST /api/v1/agent/enrich`
-
-Dispatches the **CompanyEnrichmentAgent** executing an auditable ReAct cycle (Reason -> Act -> Observe -> Reflect). Returns both the verified company envelope and the full agent reasoning trajectory.
-
-```json
-{
-  "status": "success",
-  "response": {
-    "status": "success",
-    "canonical_domain": "stripe.com",
-    "confidence_score": 0.985,
-    "confidence_tier": "HIGH_ASSURANCE",
-    "data": { ... }
-  },
-  "trajectory": {
-    "task_id": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
-    "target_company": "stripe.com",
-    "status": "completed",
-    "steps": [
-      {
-        "step_number": 1,
-        "thought": "Investigating canonical identity for input 'stripe.com'. Tracing redirects...",
-        "tool_name": "resolve_identity",
-        "observation_summary": "Resolved canonical domain: 'stripe.com' (Active: True)."
-      },
-      {
-        "step_number": 2,
-        "thought": "Crawling first-party pages (/, /about, /terms, /privacy, /contact)...",
-        "tool_name": "crawl_first_party_web",
-        "observation_summary": "Crawled 5 pages. Discovered 14 raw evidence claims."
-      },
-      {
-        "step_number": 3,
-        "thought": "Parsing embedded Schema.org JSON-LD metadata for structured entity attributes...",
-        "tool_name": "extract_structured_jsonld",
-        "observation_summary": "Extracted structured entity declarations."
-      },
-      {
-        "step_number": 4,
-        "thought": "Querying US SEC EDGAR filings for official corporate records...",
-        "tool_name": "query_government_registry",
-        "observation_summary": "SEC EDGAR search complete."
-      },
-      {
-        "step_number": 5,
-        "thought": "Reconciling all collected evidence using the Authority Matrix...",
-        "tool_name": "reconcile_consensus",
-        "observation_summary": "Initial consensus score: 0.985 (HIGH_ASSURANCE)."
-      },
-      {
-        "step_number": 6,
-        "thought": "Auditing all first-party quotes and assertions against scraped ground truth...",
-        "tool_name": "audit_grounding",
-        "observation_summary": "All citation quotes verified verbatim in scraped text."
-      }
-    ]
-  }
-}
-```
-
-### 3. Agent Trajectory Retrieval
-`GET /api/v1/agent/trajectory/{task_id}`
-Retrieves the step-by-step reasoning and action trajectory for a historical agent run.
-
-### 4. Batch Enrichment
-`POST /api/v1/enrich/batch`
-Enriches up to 50 companies concurrently with bounded execution deadlines and concurrency throttling.
-
-### 5. Historical Provenance Audit
-`GET /api/v1/enrich/{domain}/audit`
-Fetches the cached verification envelope and audit log for a given domain.
-
-### 6. Health Check
-`GET /health`
+### 2. Autonomous Verification Agent (`POST /api/v1/agent/enrich`)
+Dispatches `CompanyEnrichmentAgent` using an auditable ReAct reasoning loop and returns both the `EnrichmentResponse` and the step-by-step `AgentTrajectory`.
 
 ---
 
-## Running the Verification Test Suite
+## Testing & Empirical Benchmark Evaluation
 
-Run unit and integration tests:
+### Run Unit & Integration Tests (32 Tests)
 ```bash
-pytest -v
+.venv/bin/pytest -v
 ```
 
-All 21 automated tests cover:
-- Autonomous ReAct Agent reasoning cycle and trajectory recording.
-- TLD redirect chasing and subdomain normalization.
-- Schema.org JSON-LD structured data extraction.
-- First-party crawler for `/about`, `/terms`, `/privacy`, `/contact`, phone numbers, and emails.
-- Source Authority Matrix and dispute resolution logic.
-- Character-span verbatim grounding audits.
-- Full mocked and live FastAPI endpoints with correlation IDs and unified error envelopes.
-
+### Run Golden Benchmark & Calibration Suite
+Evaluates identity resolution precision, recall, abstention on homonyms/unresolvable inputs, field-level accuracy, and Brier calibration score across [`benchmarks/golden_companies.json`](benchmarks/golden_companies.json):
+```bash
+.venv/bin/python -m benchmarks.evaluate
+```

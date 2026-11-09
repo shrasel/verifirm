@@ -18,7 +18,7 @@ router = APIRouter()
     response_model=EnrichmentResponse,
     status_code=status.HTTP_200_OK,
     summary="Enrich and verify a single company",
-    description="Executes the full 4-stage auditable verification pipeline to enrich company data with near-100% accuracy."
+    description="Executes the 4-stage auditable verification pipeline with 3-way probabilistic entity resolution (AUTO_MATCH, NEEDS_REVIEW, UNRESOLVED)."
 )
 async def enrich_company(
     request: EnrichmentRequest,

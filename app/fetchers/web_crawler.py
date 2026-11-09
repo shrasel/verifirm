@@ -220,12 +220,15 @@ class FirstPartyWebCrawler(BaseFetcher):
 
     async def fetch(
         self,
-        canonical_domain: str,
+        canonical_domain: Optional[str],
         brand_name: Optional[str] = None,
         evidence_bag: Optional[RawEvidenceBag] = None
     ) -> RawEvidenceBag:
         if evidence_bag is None:
             evidence_bag = RawEvidenceBag(canonical_domain=canonical_domain, brand_name=brand_name)
+
+        if not canonical_domain:
+            return evidence_bag
 
         base_url = f"https://{canonical_domain}"
         client_to_close = None

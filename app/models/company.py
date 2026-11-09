@@ -27,18 +27,75 @@ class IndustryTaxonomy(BaseModel):
     label: Optional[str] = Field(default=None, description="Standardized industry descriptive label")
 
 
+class SecurityListing(BaseModel):
+    """Represents a publicly traded security instrument distinct from the legal entity."""
+    ticker: str = Field(..., description="Listed security ticker symbol")
+    exchange: Optional[str] = Field(default=None, description="Exchange code (e.g., NASDAQ, NYSE)")
+    cik: Optional[str] = Field(default=None, description="Associated SEC CIK")
+    figi: Optional[str] = Field(default=None, description="OpenFIGI instrument identifier")
+
+
+class LegalEntityRecord(BaseModel):
+    """
+    Distinct representation of the statutory legal entity as recorded in an official registry.
+    Never collapses trading brand or website liveness into legal status.
+    """
+    registered_name: Optional[str] = Field(default=None, description="Exact official registered name without casing alteration")
+    jurisdiction: Optional[str] = Field(default=None, description="Jurisdiction of incorporation (e.g., 'US-DE', 'GB')")
+    registration_number: Optional[str] = Field(default=None, description="Official company registration number")
+    lei: Optional[str] = Field(default=None, description="20-character ISO 17442 Legal Entity Identifier")
+    cik: Optional[str] = Field(default=None, description="US SEC Central Index Key")
+    legal_status: OperatingStatus = Field(default=OperatingStatus.UNKNOWN, description="Statutory legal status from registry")
+    incorporation_date: Optional[str] = Field(default=None, description="Date or year of statutory incorporation")
+    registered_office: Optional[HeadquartersAddress] = Field(default=None, description="Statutory registered office / mailing address")
+    former_names: list[str] = Field(default_factory=list, description="Historical legal names from registry filings")
+    parent_lei: Optional[str] = Field(default=None, description="Direct or ultimate parent LEI if disclosed")
+
+
+class BrandProfile(BaseModel):
+    """
+    Public-facing commercial brand or operating profile.
+    """
+    brand_name: Optional[str] = Field(default=None, description="Trading or commercial brand name")
+    operating_headquarters: Optional[HeadquartersAddress] = Field(default=None, description="Principal executive / operating headquarters")
+    phone: Optional[str] = Field(default=None, description="Primary verified contact telephone")
+    email: Optional[str] = Field(default=None, description="Primary verified contact email")
+    employee_range: Optional[str] = Field(default=None, description="Employee headcount range")
+    description: Optional[str] = Field(default=None, description="Business description")
+
+
+class WebsiteAssertion(BaseModel):
+    """
+    Treats the web domain as a separate assertion linked to the company by explicit evidence,
+    rather than assuming the domain itself is the company's canonical identity.
+    """
+    canonical_domain: Optional[str] = Field(default=None, description="Normalized root domain")
+    website_url: Optional[str] = Field(default=None, description="Canonical URL")
+    is_online: bool = Field(default=False, description="Whether the website responded to HTTP probing")
+    http_status: Optional[int] = Field(default=None, description="HTTP status code from probe")
+    linkage_signals: list[str] = Field(
+        default_factory=list,
+        description="Signals linking the domain to the legal entity (e.g., terms_legal_name_match, address_match, phone_match)"
+    )
+    verification_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Evidence score linking domain to legal entity")
+    is_independently_verified: bool = Field(
+        default=False,
+        description="True when corroborated by legal terms, registry link, or matching registry address/phone"
+    )
+
+
 class CompanyData(BaseModel):
     legal_name: Optional[str] = Field(
         default=None,
-        description="Official registered legal entity name (e.g., 'Stripe, Inc.')"
+        description="Official registered legal entity name (exact spelling preserved)"
     )
     brand_name: Optional[str] = Field(
         default=None,
         description="Public-facing trade or brand name (e.g., 'Stripe')"
     )
     status: OperatingStatus = Field(
-        default=OperatingStatus.ACTIVE,
-        description="Current operational status verified via registry or live presence"
+        default=OperatingStatus.UNKNOWN,
+        description="Statutory legal entity status (defaults to Unknown unless verified by registry/terms)"
     )
     founded_year: Optional[int] = Field(
         default=None,
@@ -46,7 +103,11 @@ class CompanyData(BaseModel):
     )
     headquarters: Optional[HeadquartersAddress] = Field(
         default=None,
-        description="Primary headquarters or principal executive office"
+        description="Primary operating headquarters or principal executive office"
+    )
+    registered_office: Optional[HeadquartersAddress] = Field(
+        default=None,
+        description="Statutory registered office address (kept distinct from operating headquarters)"
     )
     employee_range: Optional[str] = Field(
         default=None,
@@ -76,8 +137,36 @@ class CompanyData(BaseModel):
         default=None,
         description="US SEC Central Index Key (if public/reporting company)"
     )
-    active_web_presence: bool = Field(
-        default=True,
-        description="Indicates whether the entity possesses a live, responsive web domain"
+    lei: Optional[str] = Field(
+        default=None,
+        description="20-character ISO 17442 Legal Entity Identifier"
     )
-
+    registration_number: Optional[str] = Field(
+        default=None,
+        description="Jurisdiction company registration number"
+    )
+    jurisdiction: Optional[str] = Field(
+        default=None,
+        description="Statutory jurisdiction of incorporation (e.g., 'US-DE', 'GB')"
+    )
+    active_web_presence: bool = Field(
+        default=False,
+        description="Indicates whether the entity possesses a live, responsive web domain (distinct from legal status)"
+    )
+    # Distinct structured records separating Legal Entity, Brand, Website Assertion, and Listed Securities
+    legal_entity: Optional[LegalEntityRecord] = Field(
+        default=None,
+        description="Distinct statutory legal entity record"
+    )
+    brand_profile: Optional[BrandProfile] = Field(
+        default=None,
+        description="Distinct commercial brand and operating profile"
+    )
+    website_assertion: Optional[WebsiteAssertion] = Field(
+        default=None,
+        description="Explicit domain-to-entity linkage assertion and verification signals"
+    )
+    securities: list[SecurityListing] = Field(
+        default_factory=list,
+        description="Associated listed securities (tickers, exchanges, CIK/FIGI)"
+    )

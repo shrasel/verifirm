@@ -1,0 +1,118 @@
+[
+  {
+    "case_id": "us_public_nvidia",
+    "category": "us_public",
+    "input": {
+      "name": "NVIDIA",
+      "ticker": "NVDA",
+      "jurisdiction_hint": "US"
+    },
+    "expected": {
+      "match_decision": "AUTO_MATCH",
+      "canonical_domain": "nvidia.com",
+      "legal_name": "NVIDIA CORP",
+      "status": "Active",
+      "hq_city": "SANTA CLARA",
+      "registered_office_city": "WILMINGTON",
+      "cik": "0001045810"
+    }
+  },
+  {
+    "case_id": "us_private_stripe",
+    "category": "private_company",
+    "input": {
+      "website": "https://stripe.com"
+    },
+    "expected": {
+      "match_decision": "AUTO_MATCH",
+      "canonical_domain": "stripe.com",
+      "legal_name": "Stripe, Inc.",
+      "status": "Unknown",
+      "founded_year": 2010,
+      "hq_city": "South San Francisco",
+      "email": "info@stripe.com"
+    }
+  },
+  {
+    "case_id": "rebranded_meta",
+    "category": "rebranded_entity",
+    "input": {
+      "name": "Meta Platforms, Inc.",
+      "jurisdiction_hint": "US"
+    },
+    "expected": {
+      "match_decision": "AUTO_MATCH",
+      "canonical_domain": "meta.com",
+      "legal_name": "Meta Platforms, Inc.",
+      "status": "Active",
+      "hq_city": "MENLO PARK",
+      "cik": "0001326801"
+    }
+  },
+  {
+    "case_id": "non_us_gleif_siemens_no_website",
+    "category": "non_us_no_website",
+    "input": {
+      "lei": "5493006MHB84DD0ZWV18",
+      "jurisdiction_hint": "DE"
+    },
+    "expected": {
+      "match_decision": "AUTO_MATCH",
+      "canonical_domain": null,
+      "legal_name": "SIEMENS AKTIENGESELLSCHAFT",
+      "status": "Active",
+      "hq_city": "München",
+      "registered_office_city": "München",
+      "lei": "5493006MHB84DD0ZWV18"
+    }
+  },
+  {
+    "case_id": "inactive_deregistered_filer",
+    "category": "inactive_company",
+    "input": {
+      "cik": "0000806085",
+      "name": "LEHMAN BROTHERS HOLDINGS INC"
+    },
+    "expected": {
+      "match_decision": "AUTO_MATCH",
+      "canonical_domain": null,
+      "legal_name": "LEHMAN BROTHERS HOLDINGS INC",
+      "status": "Inactive",
+      "cik": "0000806085"
+    }
+  },
+  {
+    "case_id": "homonym_delta_needs_review",
+    "category": "ambiguous_homonym",
+    "input": {
+      "name": "Delta"
+    },
+    "expected": {
+      "match_decision": "NEEDS_REVIEW",
+      "canonical_domain": null
+    }
+  },
+  {
+    "case_id": "nonexistent_company_unresolved",
+    "category": "unresolved_abstention",
+    "input": {
+      "name": "Xyzzy Nonexistent Global Holdings LLC"
+    },
+    "expected": {
+      "match_decision": "UNRESOLVED",
+      "canonical_domain": null
+    }
+  },
+  {
+    "case_id": "parked_domain_candidate_unresolved",
+    "category": "parked_domain_trap",
+    "input": {
+      "name": "ParkedVentureTrap Corp"
+    },
+    "expected": {
+      "match_decision": "UNRESOLVED",
+      "canonical_domain": null
+    }
+  }
+]
+

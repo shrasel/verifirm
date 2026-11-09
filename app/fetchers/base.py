@@ -19,15 +19,26 @@ class ExtractedEvidence(BaseModel):
     value: Any
     source_name: str
     source_type: str
-    confidence: float
+    confidence: float = Field(..., ge=0.0, le=1.0)
     verbatim_quote: Optional[str] = None
     filing_id: Optional[str] = None
     retrieved_at: str
+    source_url: Optional[str] = None
+    source_updated_at: Optional[str] = None
+    raw_claim: Optional[Any] = None
+    transformation_applied: Optional[str] = None
 
 
 class RawEvidenceBag(BaseModel):
-    canonical_domain: str
+    canonical_domain: Optional[str] = None
     brand_name: Optional[str] = None
+    jurisdiction_hint: Optional[str] = None
+    cik: Optional[str] = None
+    lei: Optional[str] = None
+    registration_number: Optional[str] = None
+    ticker: Optional[str] = None
+    exchange: Optional[str] = None
+    http_status: Optional[int] = None
     pages: list[ScrapedPage] = Field(default_factory=list)
     jsonld_entities: list[dict[str, Any]] = Field(default_factory=list)
     registry_filings: list[dict[str, Any]] = Field(default_factory=list)
@@ -45,12 +56,11 @@ class BaseFetcher(ABC):
     @abstractmethod
     async def fetch(
         self,
-        canonical_domain: str,
+        canonical_domain: Optional[str],
         brand_name: Optional[str] = None,
         evidence_bag: Optional[RawEvidenceBag] = None
     ) -> RawEvidenceBag:
         """
-        Asynchronously fetches and populates raw evidence for a given domain/brand.
+        Asynchronously fetches and populates raw evidence for a given domain/brand/identifier.
         """
         pass
-

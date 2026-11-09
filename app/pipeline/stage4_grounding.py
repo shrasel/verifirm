@@ -23,7 +23,6 @@ class GroundingAuditor:
         """
         if not text:
             return ""
-        # Remove extra whitespace and special non-breaking characters
         s = re.sub(r"\s+", " ", text)
         return s.strip().lower()
 
@@ -32,16 +31,26 @@ class GroundingAuditor:
         """
         Checks whether the citation quote exists verbatim in the scraped raw text.
         """
-        if not citation_quote:
+        if not citation_quote or not raw_corpus:
             return False
-        if not raw_corpus:
+
+        if citation_quote.startswith("[UNGROUNDED/AUDIT_FAILED]"):
             return False
 
         norm_quote = cls.normalize_for_matching(citation_quote)
         norm_corpus = cls.normalize_for_matching(raw_corpus)
 
-        # Allow matching if quote is a verbatim substring
-        return norm_quote in norm_corpus
+        if norm_quote in norm_corpus:
+            return True
+
+        # Support HTML attribute citations (href="mailto:..." or href="tel:...") when value is in corpus
+        attr_match = re.search(r'href=["\'](?:mailto|tel):([^"\'?]+)', citation_quote, re.I)
+        if attr_match:
+            extracted_val = cls.normalize_for_matching(attr_match.group(1))
+            if extracted_val and extracted_val in norm_corpus:
+                return True
+
+        return False
 
     @classmethod
     def audit_provenance(
@@ -51,12 +60,11 @@ class GroundingAuditor:
         raw_corpus: str
     ) -> list[str]:
         """
-        Audits all first-party extracted claims.
+        Audits all first-party extracted claims idempotently.
         Returns list of fields that failed grounding audit.
         """
         audit_failures: list[str] = []
 
-        # Sources that require verbatim presence in scraped ground-truth text
         GROUNDED_SOURCES = {
             SourceType.FIRST_PARTY_TERMS.value,
             SourceType.FIRST_PARTY_ABOUT.value,
@@ -65,17 +73,19 @@ class GroundingAuditor:
         }
 
         for field, prov in list(provenance.items()):
-            if prov.source_type in GROUNDED_SOURCES:
-                quote = prov.exact_quote
+            src_val = prov.source_type.value if hasattr(prov.source_type, "value") else str(prov.source_type)
+            if src_val in GROUNDED_SOURCES:
+                quote = prov.exact_quote or ""
+                if quote.startswith("[UNGROUNDED/AUDIT_FAILED]"):
+                    audit_failures.append(field)
+                    continue
                 if not quote or not cls.verify_grounding(quote, raw_corpus):
                     logger.warning(
                         f"Grounding Audit FAILURE for field '{field}': "
                         f"Citation '{quote}' was not found in raw corpus."
                     )
                     audit_failures.append(field)
-                    # Severely penalize confidence and flag ungrounded claim
                     prov.confidence = round(prov.confidence * 0.4, 2)
                     prov.exact_quote = f"[UNGROUNDED/AUDIT_FAILED]: {quote}"
 
         return audit_failures
-

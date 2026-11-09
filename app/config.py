@@ -10,14 +10,18 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    APP_NAME: str = "Company Verification & Enrichment Service"
+    APP_NAME: str = "Verifirm — Auditable Company Verification & Enrichment Service"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
     PORT: int = 8000
     HOST: str = "0.0.0.0"
 
-    # User-Agent for compliant crawling & SEC EDGAR
-    USER_AGENT: str = "CompanyEnrichmentService/1.0 (auditable-pipeline; contact@example.com)"
+    # Compliant User-Agent for SEC EDGAR (max 10 req/s policy) & Wikidata APIs
+    USER_AGENT: str = (
+        "Verifirm/2.0 (Open-Source Corporate Verification Engine; "
+        "https://github.com/shrasel/verifirm; shrasel@users.noreply.github.com)"
+    )
+    SEC_MAX_REQUESTS_PER_SECOND: int = 10
 
     # Timeouts & Concurrency
     HTTP_TIMEOUT_SECONDS: float = 8.0
@@ -29,7 +33,9 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
 
     # Optional Pluggable Provider Keys
+    BRAVE_SEARCH_API_KEY: Optional[str] = None
     SERPAPI_API_KEY: Optional[str] = None
+    COMPANIES_HOUSE_API_KEY: Optional[str] = None
     OPENCORPORATES_API_KEY: Optional[str] = None
     PDL_API_KEY: Optional[str] = None
     APOLLO_API_KEY: Optional[str] = None
@@ -43,4 +49,3 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
-
